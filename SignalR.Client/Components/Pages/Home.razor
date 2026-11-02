@@ -1,7 +1,142 @@
 ﻿@page "/"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.SignalR
+@using Microsoft.AspNetCore.SignalR.Client
+@using SignalR.Shared.Contracts
 
 <PageTitle>Home</PageTitle>
 
-<h1>Hello, world!</h1>
+<div class="container">
+    <div class="card shadow-lg">
+        <div class="card-header d-flex align-items-center">
+            <h3 class="mb-0">Chat en vivo</h3>
+        </div>
 
-Welcome to your new app.
+        <div class="card-body d-flex flex-column gap-3">
+
+            @*Usuario*@
+            <div>
+                <label class="form-label fw-bold">Usuario</label>
+                <input @bind="user" class="form-control" placeholder="Ej: Juanito Lopez" maxlength="40" />
+            </div>
+
+            @*Campo de mensaje*@
+            <div>
+                <label class="form-label fw-bold">Mensaje</label>
+                <input @bind="message" class="form-control" maxlength="1000" />
+            </div>
+
+            @*Boton para enviar*@
+            <button class="btn btn-primary" @onclick="SendMessage" disabled="@(connection.State != HubConnectionState.Connected)">
+                Enviar
+            </button>
+        </div>
+    
+        @*Estado del servidor*@
+        <div class="card-footer">
+            <p class="mb-0">@status</p>
+        </div>
+    </div>
+
+    @*Vista de mensajes*@
+    <div class="mt-4">
+        <h5 class="mb-3">Mensajes</h5>
+        <ul class="list-group">
+            @foreach (var msg in messages)
+            {
+                <li class="list-group-item">
+                    <strong>@msg.User:</strong>
+                    @msg.Message
+                </li>
+            }
+        </ul>
+    </div>
+</div>
+
+@code {
+
+    private HubConnection connection = null!;
+
+    private List<ChatMessage> messages = new();
+
+    private string user = string.Empty;
+    private string message = string.Empty;
+    private string status = "Desconectado";
+
+    protected override async Task OnInitializedAsync()
+    {
+        connection = new HubConnectionBuilder()
+        .WithUrl("https://localhost:7001/chatHub")
+        .WithAutomaticReconnect()
+        .Build();
+
+        connection.On<ChatMessage>("ReceiveMessage", message =>
+        {
+            messages.Add(message);
+
+            return InvokeAsync(StateHasChanged);
+        });
+
+        connection.Reconnecting += erro =>
+        {
+            status = "Reconectando...";
+
+            return InvokeAsync(StateHasChanged);
+        };
+
+        connection.Reconnected += erro =>
+        {
+            status = "Conectado.";
+
+            return InvokeAsync(StateHasChanged);
+        };
+
+        connection.Closed += erro =>
+        {
+            status = "Desconectado.";
+
+            return InvokeAsync(StateHasChanged);
+        };
+
+        try
+        {
+            await connection.StartAsync();
+            status = "Conectado.";
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            status = "Error de conexion.";
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(user) ||
+            string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        if (connection.State != HubConnectionState.Connected)
+        {
+            status = "Sin conexion.";
+            return;
+        }
+
+        try
+        {
+            await connection.InvokeAsync(
+                "SendMessage",
+                user,
+                message
+            );
+            message = string.Empty;
+        }
+        catch(HubException e)
+        {
+            status = e.Message;
+        }
+    }
+}
